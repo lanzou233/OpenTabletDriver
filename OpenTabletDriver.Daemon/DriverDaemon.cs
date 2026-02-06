@@ -49,10 +49,17 @@ namespace OpenTabletDriver.Daemon
             Driver.TabletsChanged += (sender, e) => TabletsChanged?.Invoke(sender, e);
             Driver.CompositeDeviceHub.DevicesChanged += async (sender, args) =>
             {
-                if (args.Additions.Any())
+                if (!args.Additions.Any()) return;
+
+                // only re-initialize pipeline if a relevant device is plugged in
+                if (args.Additions.Any(x => Driver.KnownVendorIDs.Contains(x.VendorID)))
                 {
                     await DetectTablets();
                     await SetSettings(Settings);
+                }
+                else
+                {
+                    Log.Write(nameof(DriverDaemon), "No known tablets added, skipping detect", LogLevel.Debug);
                 }
             };
 
@@ -395,16 +402,21 @@ namespace OpenTabletDriver.Daemon
         {
             string group = dev.Properties.Name;
 
-            var elements = from store in profile.Filters
-                           where store.Enable
-                           let filter = store.Construct<IPositionedPipelineElement<IDeviceReport>>(outputMode.Tablet)
-                           where filter != null
-                           select filter;
+            var elements = (from store in profile.Filters
+                            where store.Enable
+                            let filter = store.Construct<IPositionedPipelineElement<IDeviceReport>>(outputMode.Tablet)
+                            where filter != null
+                            select filter!).ToArray();
+
             outputMode.Elements = elements.Append(bindingHandler).ToList();
 
-            var activeFilters = outputMode.Elements.Where(e => e != bindingHandler).ToList();
-            if (activeFilters.Count != 0)
-                Log.Write(group, $"Filters: {string.Join(", ", activeFilters)}");
+            foreach (var filter in elements)
+            {
+                var pluginSettings = profile.Filters.First(x => x.Path == filter.GetType().FullName);
+                if (pluginSettings == null) continue;
+
+                Log.Write(group, $"Filter Settings {pluginSettings.GetHumanReadableString()}");
+            }
         }
 
         private void SetAbsoluteModeSettings(InputDeviceTree dev, AbsoluteOutputMode absoluteMode, AbsoluteModeSettings settings)
