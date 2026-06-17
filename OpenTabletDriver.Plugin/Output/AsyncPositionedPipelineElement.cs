@@ -12,21 +12,21 @@ namespace OpenTabletDriver.Plugin.Output
     {
         private readonly object synchronizationObject = new object();
         private HPETDeltaStopwatch consumeWatch = new HPETDeltaStopwatch(false);
-        private ITimer scheduler;
+        private ITimer? scheduler;
         private float? reportMsAvg;
         private float frequency;
 
         /// <summary>
         /// The current state of the <see cref="AsyncPositionedPipelineElement{T}"/>.
         /// </summary>
-        protected T State { set; get; }
+        protected T? State { set; get; }
 
-        public event Action<T> Emit;
+        public event Action<T>? Emit;
 
         public abstract PipelinePosition Position { get; }
 
         [Resolved]
-        public ITimer Scheduler
+        public ITimer? Scheduler
         {
             set
             {
@@ -41,6 +41,7 @@ namespace OpenTabletDriver.Plugin.Output
                             UpdateState();
                         }
                     };
+                    this.scheduler.Interval = 1000 / Frequency;
                     this.scheduler.Start();
                 }
             }
@@ -53,15 +54,18 @@ namespace OpenTabletDriver.Plugin.Output
             set
             {
                 this.frequency = value;
-                if (Scheduler.Enabled)
-                    Scheduler.Stop();
-                Scheduler.Interval = 1000f / value;
-                Scheduler.Start();
+                if (Scheduler != null)
+                {
+                    if (Scheduler is { Enabled: true })
+                        Scheduler.Stop();
+                    Scheduler.Interval = 1000f / value;
+                    Scheduler.Start();
+                }
             }
             get => this.frequency;
         }
 
-        public void Consume(T value)
+        public void Consume(T? value)
         {
             // Block DeviceReport and ITouchReport from being consumed for now
             if (value is DeviceReport or ITouchReport)
@@ -84,7 +88,6 @@ namespace OpenTabletDriver.Plugin.Output
         /// <remarks>
         /// This is called by <see cref="Consume"/> whenever a report is received from a linked upstream element.
         /// </remarks>
-        /// <param name="value"></param>
         protected abstract void ConsumeState();
 
         /// <summary>
@@ -122,10 +125,23 @@ namespace OpenTabletDriver.Plugin.Output
 
         public void Dispose()
         {
-            Scheduler?.Dispose();
-            Scheduler = null;
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
-        ~AsyncPositionedPipelineElement() => Dispose();
+        private bool _isDisposed;
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_isDisposed) return;
+
+            if (disposing)
+            {
+                Scheduler?.Dispose();
+                Scheduler = null;
+            }
+
+            _isDisposed = true;
+        }
     }
 }
